@@ -35,16 +35,7 @@ android {
     }
 
     buildFeatures {
-        viewBinding = true
-    }
-
-    packaging {
-        // Pty4J 和 JNA 带来的重复文件处理
-        resources {
-            excludes += "/META-INF/{AL2.0,LGPL2.1}"
-            excludes += "/META-INF/DEPENDENCIES"
-            excludes += "/META-INF/INDEX.LIST"
-        }
+        viewBinding = false
     }
 }
 
@@ -57,13 +48,10 @@ dependencies {
     // JSch：SSH 连接库
     implementation("com.jcraft:jsch:0.1.55")
 
-    // Pty4J：伪终端库
-    // 注意：Pty4J 依赖 JNA，在纯 Android 环境可能受限
-    // 备选方案见 LocalTerminalEmulator.kt 中的注释
-    implementation("org.jetbrains.pty4j:pty4j:0.12.18")
-
-    // JNA (Pty4J 的依赖)
-    implementation("net.java.dev.jna:jna:5.15.0@aar")
+    // Pty4J（伪终端库）通过反射加载，非编译期依赖。
+    // 若设备支持（如 Termux 环境），只需将 pty4j + JNA 的 jar 放入 libs/ 即可，
+    // LocalTerminalEmulator 会自动检测并使用。
+    // 纯 Android 环境自动降级到纯 Java Pipe 方案。
 
     // 协程
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
