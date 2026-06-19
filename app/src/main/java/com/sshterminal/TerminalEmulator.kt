@@ -237,10 +237,10 @@ class TerminalEmulator(
             param == 48 -> {} // 扩展背景色 — 简化处理
             param == 39 -> buffer.currentFg = TerminalBuffer.DEFAULT_FG
             param == 49 -> buffer.currentBg = TerminalBuffer.DEFAULT_BG
-            in 30..37 -> buffer.currentFg = param - 30    // 标准前景
-            in 40..47 -> buffer.currentBg = param - 40    // 标准背景
-            in 90..97 -> buffer.currentFg = param - 90 + 8 // 亮前景
-            in 100..107 -> buffer.currentBg = param - 100 + 8 // 亮背景
+            param in 30..37 -> buffer.currentFg = param - 30    // 标准前景
+            param in 40..47 -> buffer.currentBg = param - 40    // 标准背景
+            param in 90..97 -> buffer.currentFg = param - 90 + 8 // 亮前景
+            param in 100..107 -> buffer.currentBg = param - 100 + 8 // 亮背景
         }
     }
 
