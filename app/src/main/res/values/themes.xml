@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.SSHTerminal" parent="Theme.AppCompat.DayNight.DarkActionBar">
+        <item name="colorPrimary">#1B1B2F</item>
+        <item name="colorPrimaryDark">#162447</item>
+        <item name="colorAccent">#00D2FF</item>
+        <item name="android:windowBackground">#0D0D1A</item>
+    </style>
+</resources>
