@@ -51,9 +51,7 @@ class TerminalBuffer(
 
     // 光标
     var cursorRow: Int = 0
-        private set
     var cursorCol: Int = 0
-        private set
 
     // 当前样式（SGR 状态机）
     var currentFg: Int = DEFAULT_FG
@@ -193,7 +191,7 @@ class TerminalBuffer(
         }
     }
 
-    private fun currentLine(): Array<Cell> {
+    fun currentLine(): Array<Cell> {
         // 确保有足够的行
         while (cursorRow >= visibleLines.size) {
             visibleLines.add(emptyRow())

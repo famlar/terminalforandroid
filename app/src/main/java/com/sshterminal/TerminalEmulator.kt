@@ -197,18 +197,12 @@ class TerminalEmulator(
                 }
             }
             'h' -> {                                                             // SM — 设置模式
-                when (p(0)) {
-                    1049 -> buffer.switchToAltBuffer()
-                    25 -> {} // 显示光标（暂时忽略）
-                    47 -> buffer.switchToAltBuffer()
-                }
+                val mode = p(0)
+                if (mode == 1049 || mode == 47) buffer.switchToAltBuffer()
             }
             'l' -> {                                                             // RM — 重置模式
-                when (p(0)) {
-                    1049 -> buffer.switchToMainBuffer()
-                    25 -> {} // 隐藏光标（暂时忽略）
-                    47 -> buffer.switchToMainBuffer()
-                }
+                val mode = p(0)
+                if (mode == 1049 || mode == 47) buffer.switchToMainBuffer()
             }
         }
     }
