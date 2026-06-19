@@ -60,7 +60,7 @@ dependencies {
     // Pty4J：伪终端库
     // 注意：Pty4J 依赖 JNA，在纯 Android 环境可能受限
     // 备选方案见 LocalTerminalEmulator.kt 中的注释
-    implementation("org.jetbrains.pty4j:pty4j:0.12.17")
+    implementation("org.jetbrains.pty4j:pty4j:0.12.18")
 
     // JNA (Pty4J 的依赖)
     implementation("net.java.dev.jna:jna:5.15.0@aar")
