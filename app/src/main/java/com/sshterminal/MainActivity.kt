@@ -3,42 +3,32 @@ package com.sshterminal
 import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
-import android.widget.ScrollView
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 /**
- * 主 Activity — SSH 终端 UI
+ * 主 Activity — SSH 终端
  *
- * 提供连接面板、终端输出显示和命令输入栏。
- * 所有网络和 IO 操作在后台协程中执行。
+ * 连接面板 + 全屏 TerminalView
+ * TerminalView 直接处理键盘输入（软键盘/物理键盘）
+ * 无需独立的命令输入栏
  */
 class MainActivity : AppCompatActivity() {
 
-    // UI 组件
     private lateinit var hostInput: EditText
     private lateinit var portInput: EditText
     private lateinit var userInput: EditText
     private lateinit var passwordInput: EditText
     private lateinit var connectButton: Button
-    private lateinit var terminalOutput: TextView
-    private lateinit var scrollView: ScrollView
-    private lateinit var commandInput: EditText
-    private lateinit var sendButton: Button
+    private lateinit var statusText: TextView
+    private lateinit var terminalView: TerminalView
 
-    // 核心逻辑
     private val terminalSession = TerminalSession()
-    private var displayJob: Job? = null
     private var isConnected = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -51,7 +41,9 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        disconnect()
+        if (isConnected) {
+            lifecycleScope.launch { terminalSession.disconnect() }
+        }
     }
 
     private fun bindViews() {
@@ -60,32 +52,24 @@ class MainActivity : AppCompatActivity() {
         userInput = findViewById(R.id.userInput)
         passwordInput = findViewById(R.id.passwordInput)
         connectButton = findViewById(R.id.connectButton)
-        terminalOutput = findViewById(R.id.terminalOutput)
-        scrollView = findViewById(R.id.scrollView)
-        commandInput = findViewById(R.id.commandInput)
-        sendButton = findViewById(R.id.sendButton)
+        statusText = findViewById(R.id.statusText)
+        terminalView = findViewById(R.id.terminalView)
 
-        // 设置默认值以便快速测试
+        // 默认值
         hostInput.setText("192.168.1.1")
         portInput.setText("22")
     }
 
     private fun setupListeners() {
         connectButton.setOnClickListener {
+            if (isConnected) disconnect() else connect()
+        }
+
+        // TerminalView 键盘输入直接发往 SSH
+        terminalView.onKeyInput = { text ->
             if (isConnected) {
-                disconnect()
-            } else {
-                connect()
+                terminalSession.writeInput(text)
             }
-        }
-
-        sendButton.setOnClickListener {
-            sendCommand()
-        }
-
-        commandInput.setOnEditorActionListener { _, _, _ ->
-            sendCommand()
-            true
         }
     }
 
@@ -100,96 +84,53 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        connectButton.isEnabled = false
-        connectButton.text = "Connecting..."
-        appendOutput("正在连接 $username@$host:$port ...\n")
+        setConnectingState(true)
+        setStatus("正在连接 $username@$host:$port ...")
 
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                terminalSession.startSession(host, port, username, password)
+                val emulator = terminalSession.connect(host, port, username, password)
+
                 withContext(Dispatchers.Main) {
+                    // 将 TerminalEmulator 绑定到 TerminalView
+                    terminalView.emulator = emulator
+                    terminalView.postInvalidate()
+                    terminalView.requestFocus()
+
                     isConnected = true
-                    connectButton.text = "Disconnect"
-                    connectButton.isEnabled = true
-                    appendOutput("✓ 连接成功！\n")
+                    setConnectingState(false)
+                    setStatus("已连接 $username@$host:$port  (双击回到底部)")
                 }
-                // 启动终端输出读取
-                startDisplayReader()
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    connectButton.isEnabled = true
-                    connectButton.text = "Connect"
-                    appendOutput("✗ 连接失败: ${e.message}\n")
+                    setConnectingState(false)
+                    setStatus("连接失败: ${e.message}")
                 }
             }
         }
     }
 
     private fun disconnect() {
-        displayJob?.cancel()
         lifecycleScope.launch {
             terminalSession.disconnect()
             isConnected = false
             connectButton.text = "Connect"
-            appendOutput("--- 已断开连接 ---\n")
+            terminalView.emulator = null
+            terminalView.postInvalidate()
+            setStatus("已断开")
         }
     }
 
-    /**
-     * 在后台读取终端输出并显示到 UI
-     */
-    private fun startDisplayReader() {
-        displayJob?.cancel()
-        displayJob = lifecycleScope.launch(Dispatchers.IO) {
-            try {
-                val reader = BufferedReader(
-                    InputStreamReader(terminalSession.getDisplayStream())
-                )
-                val buffer = CharArray(4096)
-                var charsRead: Int
-
-                while (isActive) {
-                    if (reader.ready()) {
-                        charsRead = reader.read(buffer)
-                        if (charsRead > 0) {
-                            val text = String(buffer, 0, charsRead)
-                            withContext(Dispatchers.Main) {
-                                appendOutput(text)
-                            }
-                        }
-                    } else {
-                        delay(50) // 避免忙等
-                    }
-                }
-            } catch (_: Exception) {
-            }
-        }
+    private fun setConnectingState(isConnecting: Boolean) {
+        connectButton.isEnabled = !isConnecting
+        connectButton.text = if (isConnecting) "连接中..." else "Disconnect"
+        hostInput.isEnabled = !isConnecting
+        portInput.isEnabled = !isConnecting
+        userInput.isEnabled = !isConnecting
+        passwordInput.isEnabled = !isConnecting
     }
 
-    /**
-     * 向本地终端写入命令（数据会通过 SSH 传到远程）
-     */
-    private fun sendCommand() {
-        if (!isConnected) {
-            Toast.makeText(this, "未连接", Toast.LENGTH_SHORT).show()
-            return
-        }
-        val cmd = commandInput.text.toString()
-        if (cmd.isBlank()) return
-
-        // 将命令 + 换行符写入本地终端
-        terminalSession.keyboardToLocal((cmd + "\n").toByteArray())
-        commandInput.text.clear()
-    }
-
-    /**
-     * 追加文本到终端输出并自动滚动到底部
-     */
-    private fun appendOutput(text: String) {
-        terminalOutput.append(text)
-        // 自动滚动到底部
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
+    private fun setStatus(text: String) {
+        statusText.text = text
     }
 }
