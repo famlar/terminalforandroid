@@ -46,7 +46,7 @@ class SSHConnectionManager {
         session = jsch.getSession(username, host, port).apply {
             // 密码认证（当没有私钥时使用）
             if (password != null) {
-                this.password = password
+                setPassword(password)
             }
 
             // 简化开发：跳过主机密钥验证
@@ -85,7 +85,7 @@ class SSHConnectionManager {
     /**
      * 获取远程 shell 的错误流
      */
-    fun getErrorStream(): InputStream? = channelShell?.errStream
+    fun getErrorStream(): InputStream? = null
 
     /**
      * 检查 SSH 通道是否已连接且活跃
