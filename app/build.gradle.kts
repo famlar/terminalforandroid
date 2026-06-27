@@ -9,7 +9,7 @@ android {
     ndkVersion = "27.0.12077973"
 
     signingConfigs {
-        create("debug") {
+        create("fixed") {
             storeFile = file("debug.keystore")
             storePassword = "android"
             keyAlias = "debug"
@@ -31,11 +31,11 @@ android {
 
     buildTypes {
         debug {
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
         }
         release {
             isMinifyEnabled = false
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("fixed")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
