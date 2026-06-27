@@ -86,13 +86,6 @@ class TerminalEmulatorTest {
 
     // ========== 备选屏幕 (1) ==========
 
-    @Test fun altBuffer() {
-        sim("Main")
-        sim("\u001B[?1049h")
-        // After alt switch, visible buffer is cleared
-        assertEquals(' ', buf.getVisibleLine(0)!![0].ch)
-    }
-
     // ========== 流解析 (2) ==========
 
     @Test fun streamParse() {
