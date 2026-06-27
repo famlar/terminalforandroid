@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.os.Handler
+import android.os.Looper
 import android.text.ClipboardManager
 import android.util.AttributeSet
 import android.view.GestureDetector
@@ -75,18 +77,24 @@ class TerminalView @JvmOverloads constructor(
     private var scrollAcc = 0f
     private var isScrolling = false
     private var cursorVisible = true
+    private val cursorHandler = Handler(Looper.getMainLooper())
+    private val cursorBlinkRunnable = object : Runnable {
+        override fun run() {
+            cursorVisible = !cursorVisible
+            postInvalidate()
+            cursorHandler.postDelayed(this, 500)
+        }
+    }
 
     init {
         isFocusable = true
         isFocusableInTouchMode = true
         textPaint.textSize = 42f
         updateFontMetrics()
-        postDelayed({
-            cursorVisible = !cursorVisible
-            postInvalidate()
-            postDelayed({ cursorVisible = !cursorVisible; postInvalidate() }, 500)
-        }, 500)
+        cursorHandler.postDelayed(cursorBlinkRunnable, 500)
     }
+
+    override fun onCheckIsTextEditor(): Boolean = true
 
     private fun updateFontMetrics() {
         fontWidth = textPaint.measureText("W")

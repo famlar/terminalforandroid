@@ -311,10 +311,12 @@ class TerminalBuffer(
     /** 删除字符 */
     fun deleteChars(n: Int = 1) {
         val line = currentLine()
-        for (c in cursorCol until (columns - n)) {
-            line[c].copyFrom(line[c + n])
+        val count = minOf(n, columns - cursorCol)
+        if (count <= 0) return
+        for (c in cursorCol until (columns - count)) {
+            line[c].copyFrom(line[c + count])
         }
-        for (c in (columns - n) until columns) {
+        for (c in (columns - count) until columns) {
             line[c].reset()
         }
     }

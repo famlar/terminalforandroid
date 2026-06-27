@@ -1,9 +1,9 @@
 package com.sshterminal
 
+import android.app.AlertDialog
 import android.os.Bundle
-import android.widget.Button
 import android.widget.EditText
-import android.widget.TextView
+import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -12,125 +12,227 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * 主 Activity — SSH 终端
+ * 主 Activity — WinUI3 风格标签页终端
  *
- * 连接面板 + 全屏 TerminalView
- * TerminalView 直接处理键盘输入（软键盘/物理键盘）
- * 无需独立的命令输入栏
+ * 顶部: TabBar (Windows Terminal 风格标签栏)
+ * 下方: TabContentHost (标签页内容区，管理多个 TerminalView)
  */
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var hostInput: EditText
-    private lateinit var portInput: EditText
-    private lateinit var userInput: EditText
-    private lateinit var passwordInput: EditText
-    private lateinit var connectButton: Button
-    private lateinit var statusText: TextView
-    private lateinit var terminalView: TerminalView
+    private lateinit var tabBar: TabBar
+    private lateinit var contentHost: TabContentHost
 
-    private val terminalSession = TerminalSession()
-    private var isConnected = false
+    /** 所有标签页 */
+    private val tabs = mutableListOf<TerminalTab>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        bindViews()
-        setupListeners()
+        tabBar = findViewById(R.id.tabBar)
+        contentHost = findViewById(R.id.contentHost)
+
+        setupTabBar()
+        setupContentHost()
+
+        // 启动时默认打开一个本地 Termux 标签页
+        addLocalTab()
     }
 
-    override fun onDestroy() {
-        super.onDestroy()
-        if (isConnected) {
-            lifecycleScope.launch { terminalSession.disconnect() }
+    // ========== TabBar 事件 ==========
+
+    private fun setupTabBar() {
+        tabBar.onTabSelected = { index ->
+            val tab = tabs.getOrNull(index) ?: return@onTabSelected
+            contentHost.switchToTab(tab.id)
+        }
+
+        tabBar.onTabClosed = { index ->
+            closeTab(index)
+        }
+
+        tabBar.onAddTab = {
+            showNewTabDialog()
         }
     }
 
-    private fun bindViews() {
-        hostInput = findViewById(R.id.hostInput)
-        portInput = findViewById(R.id.portInput)
-        userInput = findViewById(R.id.userInput)
-        passwordInput = findViewById(R.id.passwordInput)
-        connectButton = findViewById(R.id.connectButton)
-        statusText = findViewById(R.id.statusText)
-        terminalView = findViewById(R.id.terminalView)
-
-        // 默认值
-        hostInput.setText("192.168.1.1")
-        portInput.setText("22")
+    private fun setupContentHost() {
+        // TerminalView 的键盘输入通过 TabContentHost 路由到对应会话
     }
 
-    private fun setupListeners() {
-        connectButton.setOnClickListener {
-            if (isConnected) disconnect() else connect()
-        }
+    // ========== 标签页管理 ==========
 
-        // TerminalView 键盘输入直接发往 SSH
-        terminalView.onKeyInput = { text ->
-            if (isConnected) {
-                terminalSession.writeInput(text)
-            }
-        }
-    }
+    private fun addLocalTab() {
+        val session = LocalTerminalSession()
+        val tab = TerminalTab(
+            id = TerminalTab.newId(),
+            title = "termux",
+            subtitle = "local",
+            tabType = TabType.LOCAL,
+            session = session,
+            accentColor = TerminalTab.ACCENT_COLORS[tabs.size % TerminalTab.ACCENT_COLORS.size]
+        )
 
-    private fun connect() {
-        val host = hostInput.text.toString().trim()
-        val port = portInput.text.toString().toIntOrNull() ?: 22
-        val username = userInput.text.toString().trim()
-        val password = passwordInput.text.toString()
+        // 先创建 View，再注册标签（避免 switchToTab 时 View 不存在）
+        val view = contentHost.getOrCreateView(tab)
+        contentHost.addTabView(tab.id, view)
 
-        if (host.isEmpty() || username.isEmpty()) {
-            Toast.makeText(this, "请输入主机和用户名", Toast.LENGTH_SHORT).show()
-            return
-        }
+        tabs.add(tab)
+        tabBar.addTab(tab)
 
-        setConnectingState(true)
-        setStatus("正在连接 $username@$host:$port ...")
-
-        lifecycleScope.launch(Dispatchers.IO) {
+        lifecycleScope.launch {
             try {
-                val emulator = terminalSession.connect(host, port, username, password)
-
+                session.start(cols = 80, rows = 24)
                 withContext(Dispatchers.Main) {
-                    // 将 TerminalEmulator 绑定到 TerminalView
-                    terminalView.emulator = emulator
-                    terminalView.postInvalidate()
-                    terminalView.requestFocus()
-
-                    isConnected = true
-                    setConnectingState(false)
-                    setStatus("已连接 $username@$host:$port  (双击回到底部)")
+                    tab.state = TabState.CONNECTED
+                    tabBar.updateTabState(tabs.indexOf(tab), TabState.CONNECTED)
                 }
             } catch (e: Exception) {
                 withContext(Dispatchers.Main) {
-                    setConnectingState(false)
-                    setStatus("连接失败: ${e.message}")
+                    tab.state = TabState.DISCONNECTED
+                    tabBar.updateTabState(tabs.indexOf(tab), TabState.DISCONNECTED)
+                    Toast.makeText(this@MainActivity,
+                        "Termux 启动失败: ${e.message}", Toast.LENGTH_SHORT).show()
                 }
             }
         }
     }
 
-    private fun disconnect() {
+    private fun addSshTab(host: String, port: Int, username: String, password: String) {
+        val session = SshTerminalSession()
+        val title = "$username@$host"
+        val tab = TerminalTab(
+            id = TerminalTab.newId(),
+            title = title,
+            subtitle = "SSH",
+            tabType = TabType.SSH,
+            session = session,
+            accentColor = TerminalTab.ACCENT_COLORS[tabs.size % TerminalTab.ACCENT_COLORS.size]
+        )
+
+        // 先创建 View，再注册标签
+        val view = contentHost.getOrCreateView(tab)
+        contentHost.addTabView(tab.id, view)
+
+        tabs.add(tab)
+        tabBar.addTab(tab)
+
         lifecycleScope.launch {
-            terminalSession.disconnect()
-            isConnected = false
-            connectButton.text = "Connect"
-            terminalView.emulator = null
-            terminalView.postInvalidate()
-            setStatus("已断开")
+            try {
+                session.connect(host, port, username, password)
+                withContext(Dispatchers.Main) {
+                    tab.state = TabState.CONNECTED
+                    tabBar.updateTabState(tabs.indexOf(tab), TabState.CONNECTED)
+                }
+            } catch (e: Exception) {
+                withContext(Dispatchers.Main) {
+                    tab.state = TabState.DISCONNECTED
+                    tabBar.updateTabState(tabs.indexOf(tab), TabState.DISCONNECTED)
+                    Toast.makeText(this@MainActivity,
+                        "SSH 连接失败: ${e.message}", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
-    private fun setConnectingState(isConnecting: Boolean) {
-        connectButton.isEnabled = !isConnecting
-        connectButton.text = if (isConnecting) "连接中..." else "Disconnect"
-        hostInput.isEnabled = !isConnecting
-        portInput.isEnabled = !isConnecting
-        userInput.isEnabled = !isConnecting
-        passwordInput.isEnabled = !isConnecting
+    private fun closeTab(index: Int) {
+        val tab = tabs.getOrNull(index) ?: return
+
+        // 断开会话
+        lifecycleScope.launch {
+            tab.session.disconnect()
+        }
+
+        // 移除 UI
+        contentHost.removeViewForTab(tab.id)
+        tabs.removeAt(index)
+        tabBar.removeTab(index)
+
+        // 如果所有标签都关闭了，退出
+        if (tabs.isEmpty()) {
+            finish()
+        }
     }
 
-    private fun setStatus(text: String) {
-        statusText.text = text
+    // ========== 新建标签对话框 ==========
+
+    private fun showNewTabDialog() {
+        val options = arrayOf("Termux 本地终端", "SSH 远程连接")
+        AlertDialog.Builder(this)
+            .setTitle("新建标签页")
+            .setItems(options) { _, which ->
+                when (which) {
+                    0 -> addLocalTab()
+                    1 -> showSshDialog()
+                }
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    private fun showSshDialog() {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(40, 20, 40, 0)
+        }
+
+        val hostInput = EditText(this).apply {
+            hint = "主机 (192.168.1.1)"
+            setText("192.168.1.1")
+        }
+        val portInput = EditText(this).apply {
+            hint = "端口"
+            setText("22")
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        val userInput = EditText(this).apply { hint = "用户名" }
+        val passInput = EditText(this).apply {
+            hint = "密码"
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                    android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+        }
+
+        container.addView(hostInput)
+        container.addView(portInput)
+        container.addView(userInput)
+        container.addView(passInput)
+
+        AlertDialog.Builder(this)
+            .setTitle("SSH 连接")
+            .setView(container)
+            .setPositiveButton("连接") { _, _ ->
+                val host = hostInput.text.toString().trim()
+                val port = portInput.text.toString().toIntOrNull() ?: 22
+                val user = userInput.text.toString().trim()
+                val pass = passInput.text.toString()
+
+                if (host.isEmpty() || user.isEmpty()) {
+                    Toast.makeText(this, "请输入主机和用户名", Toast.LENGTH_SHORT).show()
+                    return@setPositiveButton
+                }
+                addSshTab(host, port, user, pass)
+            }
+            .setNegativeButton("取消", null)
+            .show()
+    }
+
+    // ========== 生命周期 ==========
+
+    override fun onDestroy() {
+        super.onDestroy()
+        for (tab in tabs) {
+            lifecycleScope.launch { tab.session.disconnect() }
+        }
+        contentHost.destroyAll()
+    }
+
+    override fun onBackPressed() {
+        if (tabs.size <= 1) {
+            super.onBackPressed()
+        } else {
+            // 关闭当前活动标签
+            val idx = tabs.indexOfFirst { it.id == contentHost.activeTabId }
+            if (idx >= 0) closeTab(idx)
+        }
     }
 }

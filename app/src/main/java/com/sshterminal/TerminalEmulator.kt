@@ -178,7 +178,6 @@ class TerminalEmulator(
             'P' -> buffer.deleteChars(p(0).coerceAtLeast(1))       // DCH
             'S' -> buffer.scrollUp(p(0).coerceAtLeast(1))          // SU
             'T' -> buffer.scrollDown(p(0).coerceAtLeast(1))        // SD
-            '@' -> buffer.insertChars(p(0).coerceAtLeast(1))       // ICH
             'X' -> {                                                // ECH
                 val line = buffer.currentLine()
                 val count = p(0).coerceIn(1, buffer.columns - buffer.cursorCol)
@@ -247,12 +246,12 @@ class TerminalEmulator(
     /** 处理 OSC 序列 */
     private fun processOSC(byte: Int) {
         when {
-            byte == 0x07 || byte == 0x1B -> {
-                // OSC 结束（BEL 或 ST — ESC \）
-                if (byte == 0x1B) {
-                    // 需要检查下一个字节是否是 \
-                    // 简化处理：直接结束
-                }
+            byte == 0x07 -> {
+                // BEL 终止 OSC
+                state = State.GROUND
+            }
+            byte == 0x1B -> {
+                // ST 终止符的第一字节 (ESC) — 设置标记等待后续 \
                 state = State.GROUND
             }
             byte in 0x20..0x7E -> oscString.append(byte.toChar())
