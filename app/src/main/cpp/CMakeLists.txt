@@ -1,23 +1,21 @@
 cmake_minimum_required(VERSION 3.22.1)
 project("termux-pty-wrapper")
 
-# Termux libtermux.so provides forkpty() on Android.
-# On a real Termux device it's at $PREFIX/lib/libtermux.so.
-# For CI/CD builds without Termux, link fails gracefully.
+# Find Termux's libtermux.so (provides forkpty on Android/Termux)
 find_library(TERMUX_LIB termux
     PATHS /data/data/com.termux/files/usr/lib
     NO_DEFAULT_PATH
 )
 
-if(NOT TERMUX_LIB)
-    message(WARNING "libtermux.so not found — PTY local terminal disabled (SSH only)")
-endif()
-
 add_library(termux-pty-wrapper SHARED termux-pty.c)
 
-target_link_libraries(termux-pty-wrapper
-    ${TERMUX_LIB}
-    log
-)
+if(TERMUX_LIB)
+    message(STATUS "libtermux.so found — PTY local terminal enabled")
+    target_link_libraries(termux-pty-wrapper ${TERMUX_LIB} log)
+else()
+    message(WARNING "libtermux.so not found — PTY disabled, SSH only")
+    target_compile_definitions(termux-pty-wrapper PRIVATE NO_TERMUX_LIB=1)
+    target_link_libraries(termux-pty-wrapper log)
+endif()
 
 target_compile_options(termux-pty-wrapper PRIVATE -Wall -O2)

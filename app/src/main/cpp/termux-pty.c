@@ -4,6 +4,9 @@
  * Calls forkpty() via Termux's libtermux.so to create a real
  * pseudo-terminal on Android. Returns a FileDescriptor for the
  * master side, which Kotlin wraps with FileInputStream/FileOutputStream.
+ *
+ * With NO_TERMUX_LIB (CI/CD): returns NULL from nativeCreatePty,
+ * Kotlin catches UnsatisfiedLinkError gracefully — SSH tabs still work.
  */
 #include <jni.h>
 #include <stdlib.h>
@@ -13,8 +16,10 @@
 #include <sys/ioctl.h>
 #include <termios.h>
 
-/* forkpty() is declared in <pty.h> on Linux; Termux provides it via libtermux.so */
+#ifndef NO_TERMUX_LIB
 #include <pty.h>
+#endif
+
 #include <android/log.h>
 
 #define TAG "TermuxPty"
@@ -27,6 +32,11 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
     jstring shellPath, jobjectArray args,
     jint cols, jint rows) {
 
+#ifdef NO_TERMUX_LIB
+    /* CI/CD stub — no PTY available */
+    LOGE("Termux PTY not available (CI build)");
+    return NULL;
+#else
     const char *shell = (*env)->GetStringUTFChars(env, shellPath, NULL);
     if (shell == NULL) return NULL;
 
@@ -74,7 +84,6 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
         setenv("SHELL", shell, 1);
 
         execvp(shell, (char *const *)argv);
-        /* execvp only returns on error */
         LOGE("execvp failed: %s", strerror(errno));
         exit(127);
     }
@@ -90,11 +99,8 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
     jmethodID fdInit = (*env)->GetMethodID(env, fdClass, "<init>", "()V");
     jobject fdObj = (*env)->NewObject(env, fdClass, fdInit);
     jfieldID fdField = (*env)->GetFieldID(env, fdClass, "fd", "I");
-
-    /* On Android, FileDescriptor.fd is private but JNI can set it */
     (*env)->SetIntField(env, fdObj, fdField, masterFd);
 
-    /* Cleanup */
     for (int i = 0; i < argc; i++) {
         (*env)->ReleaseStringUTFChars(env, (jstring)(*env)->GetObjectArrayElement(env, args, i), argv[i + 1]);
     }
@@ -102,12 +108,17 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
     (*env)->ReleaseStringUTFChars(env, shellPath, shell);
 
     return fdObj;
+#endif
 }
 
 JNIEXPORT void JNICALL
 Java_com_sshterminal_TermuxPty_nativeResize(
     JNIEnv *env, jclass clazz, jobject fdObj, jint cols, jint rows) {
 
+#ifdef NO_TERMUX_LIB
+    /* no-op */
+    (void)fdObj; (void)cols; (void)rows;
+#else
     jclass fdClass = (*env)->FindClass(env, "java/io/FileDescriptor");
     jfieldID fdField = (*env)->GetFieldID(env, fdClass, "fd", "I");
     int fd = (*env)->GetIntField(env, fdObj, fdField);
@@ -121,12 +132,17 @@ Java_com_sshterminal_TermuxPty_nativeResize(
     if (ioctl(fd, TIOCSWINSZ, &ws) == -1) {
         LOGE("ioctl TIOCSWINSZ failed: %s", strerror(errno));
     }
+#endif
 }
 
 JNIEXPORT void JNICALL
 Java_com_sshterminal_TermuxPty_nativeClose(
     JNIEnv *env, jclass clazz, jobject fdObj) {
 
+#ifdef NO_TERMUX_LIB
+    /* no-op */
+    (void)fdObj;
+#else
     jclass fdClass = (*env)->FindClass(env, "java/io/FileDescriptor");
     jfieldID fdField = (*env)->GetFieldID(env, fdClass, "fd", "I");
     int fd = (*env)->GetIntField(env, fdObj, fdField);
@@ -135,4 +151,5 @@ Java_com_sshterminal_TermuxPty_nativeClose(
         close(fd);
         (*env)->SetIntField(env, fdObj, fdField, -1);
     }
+#endif
 }

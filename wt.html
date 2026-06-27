@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+    <title>Windows Terminal Mobile — 完全复刻（终极版）</title>
+    <!-- Tailwind CSS + 自定义 -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background: #0C0C0C;
+            overflow: hidden;
+            font-family: 'Segoe UI', 'Cascadia Code', 'Fira Code', monospace;
+        }
+        /* 标签横向滚动 */
+        .tab-scroll-x {
+            scrollbar-width: thin;
+            scrollbar-color: #3b3b3b #1e1e1e;
+            overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            -webkit-overflow-scrolling: touch;
+            flex: 1;
+            display: flex;
+        }
+        .tab-scroll-x::-webkit-scrollbar {
+            height: 3px;
+        }
+        .tab-scroll-x::-webkit-scrollbar-track {
+            background: #1e1e1e;
+        }
+        .tab-scroll-x::-webkit-scrollbar-thumb {
+            background: #3b3b3b;
+            border-radius: 4px;
+        }
+        /* 终端滚动条 */
+        .term-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .term-scroll::-webkit-scrollbar-track {
+            background: #0C0C0C;
+        }
+        .term-scroll::-webkit-scrollbar-thumb {
+            background: #4a4a4a;
+            border-radius: 8px;
+        }
+        /* 标签活跃底边条 */
+        .active-tab-indicator {
+            position: absolute;
+            bottom: 0;
+            left: 12px;
+            right: 12px;
+            height: 2px;
+            background: #2b7e3a;
+            border-radius: 2px 2px 0 0;
+        }
+        .tab-close:hover {
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 4px;
+        }
+        /* 光标闪烁 */
+        .cursor-blink::after {
+            content: '▋';
+            animation: blink 1.1s step-end infinite;
+            display: inline-block;
+            margin-left: 1px;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+        .terminal-pane {
+            transition: opacity 0.2s ease, visibility 0.2s;
+        }
+        /* 顶部栏完全复刻：无应用名，只有图标（可选）和标签区、右侧双按钮 */
+        .top-bar {
+            display: flex;
+            align-items: stretch;
+            min-height: 48px;
+            background-color: #1E1E1E;
+            border-bottom: 1px solid #2D2D2D;
+        }
+        /* 左侧极简图标（Windows Terminal 风格有时只有图标） */
+        .top-bar-icon {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+            padding: 0 8px;
+            border-right: 1px solid #2D2D2D;
+        }
+        /* 标签按钮样式 */
+        .tab-btn {
+            display: inline-flex;
+            align-items: center;
+            height: 100%;
+            padding: 0 12px;
+            gap: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            border-right: 1px solid #2D2D2D;
+            transition: all 0.1s;
+            cursor: pointer;
+            background: transparent;
+            color: #9e9e9e;
+            flex-shrink: 0;
+        }
+        .tab-btn.active {
+            background-color: #2D2D2D;
+            color: white;
+        }
+        /* 组合新建按钮（加号 + 箭头） */
+        .new-tab-combo {
+            display: inline-flex;
+            align-items: center;
+            height: 100%;
+            flex-shrink: 0;
+            background: transparent;
+            border-right: 1px solid #2D2D2D;
+        }
+        .new-tab-btn, .new-tab-arrow {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            padding: 0 12px;
+            cursor: pointer;
+            color: #cccccc;
+            transition: background 0.1s;
+        }
+        .new-tab-btn:hover, .new-tab-arrow:hover {
+            background-color: #2D2D2D;
+        }
+        .new-tab-arrow {
+            padding: 0 8px;
+            border-left: 1px solid #2D2D2D;
+        }
+        /* 右侧系统键区两个按钮 */
+        .sys-key-area {
+            display: flex;
+            align-items: center;
+            flex-shrink: 0;
+            padding: 0 4px;
+            gap: 4px;
+            border-left: 1px solid #2D2D2D;
+        }
+        .sys-icon-btn {
+            padding: 8px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: background 0.1s;
+        }
+        .sys-icon-btn:hover {
+            background-color: #2D2D2D;
+        }
+        /* 下拉菜单面板 */
+        .dropdown-menu {
+            position: absolute;
+            background-color: #2D2D2D;
+            border-radius: 6px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+            z-index: 1000;
+            min-width: 160px;
+            overflow: hidden;
+            margin-top: 4px;
+        }
+        .dropdown-item {
+            padding: 8px 16px;
+            font-size: 13px;
+            color: #e0e0e0;
+            cursor: pointer;
+            transition: background 0.1s;
+            white-space: nowrap;
+        }
+        .dropdown-item:hover {
+            background-color: #3D3D3D;
+        }
+    </style>
+</head>
+<body class="bg-[#0C0C0C] text-gray-200 antialiased overflow-hidden h-screen flex flex-col">
+
+    <div class="flex flex-col h-full w-full bg-[#0C0C0C]">
+
+        <!-- 顶部栏：完全复刻 Windows Terminal（无标题文字，只有图标、标签区、组合新建按钮、双系统键） -->
+        <div class="top-bar">
+            <!-- 左侧极简图标（可保留，不显示文字） -->
+            <div class="top-bar-icon">
+                <div class="w-5 h-5 flex items-center justify-center">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect x="4" y="4" width="16" height="16" rx="2" stroke="#E1E1E1" stroke-width="1.2" fill="none"/>
+                        <path d="M9 9L13 12L9 15" stroke="#E1E1E1" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M15 15H13" stroke="#E1E1E1" stroke-width="1.2" stroke-linecap="round"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 中间：可滚动标签列表 -->
+            <div class="tab-scroll-x" id="tabScrollContainer">
+                <div id="tabsList" class="flex items-stretch h-full">
+                    <!-- 动态标签注入 -->
+                </div>
+                <!-- 组合新建按钮：加号 + 下拉箭头 -->
+                <div class="new-tab-combo" id="newTabCombo">
+                    <div class="new-tab-btn" id="newTabBtnAdd">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <line x1="12" y1="5" x2="12" y2="19"></line>
+                            <line x1="5" y1="12" x2="19" y2="12"></line>
+                        </svg>
+                    </div>
+                    <div class="new-tab-arrow" id="newTabArrow">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <polyline points="6 9 12 15 18 9"></polyline>
+                        </svg>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧系统键区：键盘 + 设置（占位，完全复刻系统键视觉） -->
+            <div class="sys-key-area">
+                <div class="sys-icon-btn" id="sysKeyboardBtn">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4.5 w-4.5 text-gray-300" viewBox="0 0 24 24" fill="currentColor" width="18" height="18">
+                        <path d="M20,5H4C2.9,5,2,5.9,2,7v10c0,1.1,0.9,2,2,2h16c1.1,0,2-0.9,2-2V7C22,5.9,21.1,5,20,5z M11,8h2v2h-2V8z M11,11h2v2h-2V11z M8,8h2v2H8V8z M8,11h2v2H8V11z M7,13H5v-2h2V13z M7,10H5V8h2V10z M15,15H9v-2h6V15z M17,13h-2v-2h2V13z M17,10h-2V8h2V10z M19,13h-2v-2h2V13z M19,10h-2V8h2V10z"/>
+                    </svg>
+                </div>
+                <div class="sys-icon-btn" id="sysSettingsBtn">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4.5 w-4.5 text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18">
+                        <circle cx="12" cy="12" r="3"></circle>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                    </svg>
+                </div>
+            </div>
+        </div>
+
+        <!-- 终端内容区 -->
+        <div id="terminalContainer" class="flex-1 relative bg-[#0C0C0C] overflow-hidden"></div>
+
+        <!-- 底部提示（保留移动端交互提示，不影响视觉一致性） -->
+        <div class="bg-[#1E1E1E] border-t border-[#2D2D2D] py-1 px-3 flex justify-between text-[10px] text-gray-500 font-mono">
+            <span>🖱️ 滑动标签栏</span>
+            <span>⌨️ 系统键区占位</span>
+            <span>✓ 完全复刻（无标题文字 + 新建下拉 + 双系统键）</span>
+        </div>
+    </div>
+
+    <script>
+        // ---------- 完全复刻 Windows Terminal 移动版（精确布局）----------
+        let tabsData = [
+            { id: 'tab1', name: 'PowerShell', icon: 'PS', prompt: 'PS> ', profile: 'powershell', contentLines: [] },
+            { id: 'tab2', name: '命令提示符', icon: 'CMD', prompt: 'C:\\Users\\Terminal>', profile: 'cmd', contentLines: [] },
+            { id: 'tab3', name: 'Ubuntu-22.04', icon: '🐧', prompt: 'user@ubuntu:~$ ', profile: 'wsl', contentLines: [] }
+        ];
+        let activeTabId = 'tab1';
+        let nextTabIdCounter = 4;
+
+        // 不同配置文件的内容模板
+        const profileTemplates = {
+            powershell: {
+                name: 'PowerShell',
+                icon: 'PS',
+                prompt: 'PS> ',
+                initLines: [
+                    'Windows PowerShell',
+                    'Copyright (C) Microsoft Corporation. All rights reserved.',
+                    '',
+                    'PS C:\\Users\\Mobile> winget --version',
+                    'v1.7.10582',
+                    'PS C:\\Users\\Mobile>'
+                ]
+            },
+            cmd: {
+                name: '命令提示符',
+                icon: 'CMD',
+                prompt: 'C:\\Users\\Terminal>',
+                initLines: [
+                    'Microsoft Windows [版本 10.0.22621.2428]',
+                    '(c) Microsoft Corporation. 保留所有权利。',
+                    '',
+                    'C:\\Users\\Terminal>echo Hello Windows Terminal Mobile',
+                    'Hello Windows Terminal Mobile',
+                    'C:\\Users\\Terminal>'
+                ]
+            },
+            wsl: {
+                name: 'Ubuntu-22.04',
+                icon: '🐧',
+                prompt: 'user@ubuntu:~$ ',
+                initLines: [
+                    'Welcome to Ubuntu 22.04 LTS (GNU/Linux 5.15.133.1-microsoft-standard-WSL2 x86_64)',
+                    '',
+                    'user@ubuntu:~$ neofetch --stdout',
+                    'user@ubuntu:~$ OS: Ubuntu 22.04.5 LTS on WSL2',
+                    'user@ubuntu:~$ Shell: bash 5.1.16',
+                    'user@ubuntu:~$ Terminal: Windows Terminal Mobile',
+                    'user@ubuntu:~$'
+                ]
+            }
+        };
+
+        // 初始化所有标签内容
+        function initTerminalContent() {
+            tabsData.forEach(tab => {
+                const template = profileTemplates[tab.profile];
+                if (template) {
+                    let base = [...template.initLines];
+                    if (base.length && !base[base.length-1].endsWith(tab.prompt) && !base[base.length-1].endsWith('>') && !base[base.length-1].endsWith('$ ')) {
+                        base.push(tab.prompt);
+                    } else if (base.length === 0) base.push(tab.prompt);
+                    tab.contentLines = base;
+                } else {
+                    tab.contentLines = [tab.prompt];
+                }
+            });
+        }
+
+        function escapeHtml(str) {
+            return str.replace(/[&<>]/g, function(m) {
+                if (m === '&') return '&amp;';
+                if (m === '<') return '&lt;';
+                if (m === '>') return '&gt;';
+                return m;
+            });
+        }
+
+        function renderTerminalPane(tabId) {
+            const paneDiv = document.getElementById(`pane-${tabId}`);
+            if (!paneDiv) return;
+            const tab = tabsData.find(t => t.id === tabId);
+            if (!tab) return;
+            const lines = tab.contentLines;
+            const isActive = (activeTabId === tabId);
+            let html = '<div class="term-scroll w-full h-full overflow-y-auto p-4 font-mono text-[13px] md:text-[14px] leading-relaxed" style="font-family: \'Cascadia Code\', \'Fira Code\', monospace;">';
+            for (let i = 0; i < lines.length; i++) {
+                let line = lines[i];
+                let isLast = (i === lines.length - 1);
+                if (isActive && isLast && (line.endsWith(tab.prompt) || line.endsWith('$ ') || line.endsWith('> ') || line.endsWith('# '))) {
+                    html += `<div class="flex flex-wrap items-center"><span class="whitespace-pre-wrap break-all">${escapeHtml(line)}</span><span class="cursor-blink ml-0.5"></span></div>`;
+                } else {
+                    html += `<div class="whitespace-pre-wrap break-all">${escapeHtml(line)}</div>`;
+                }
+            }
+            if (lines.length === 0 && isActive) {
+                html += `<div class="flex items-center"><span>${escapeHtml(tab.prompt)}</span><span class="cursor-blink"></span></div>`;
+            }
+            html += '</div>';
+            paneDiv.innerHTML = html;
+            const scrollDiv = paneDiv.querySelector('.term-scroll');
+            if (scrollDiv) scrollDiv.scrollTop = scrollDiv.scrollHeight;
+        }
+
+        function setActiveTab(tabId) {
+            if (activeTabId === tabId) return;
+            const oldId = activeTabId;
+            activeTabId = tabId;
+            document.querySelectorAll('.tab-btn').forEach(btn => {
+                const tid = btn.getAttribute('data-tab-id');
+                if (tid === tabId) {
+                    btn.classList.add('active');
+                    let indicator = btn.querySelector('.tab-indicator');
+                    if (!indicator) {
+                        indicator = document.createElement('div');
+                        indicator.className = 'active-tab-indicator tab-indicator';
+                        btn.appendChild(indicator);
+                    }
+                } else {
+                    btn.classList.remove('active');
+                    const indicator = btn.querySelector('.tab-indicator');
+                    if (indicator) indicator.remove();
+                }
+            });
+            document.querySelectorAll('.terminal-pane').forEach(pane => {
+                const paneId = pane.getAttribute('data-pane-id');
+                if (paneId === tabId) {
+                    pane.style.opacity = '1';
+                    pane.style.visibility = 'visible';
+                    pane.style.pointerEvents = 'auto';
+                    pane.classList.add('z-10');
+                    pane.classList.remove('z-0');
+                } else {
+                    pane.style.opacity = '0';
+                    pane.style.visibility = 'hidden';
+                    pane.style.pointerEvents = 'none';
+                    pane.classList.remove('z-10');
+                    pane.classList.add('z-0');
+                }
+            });
+            renderTerminalPane(tabId);
+            if (oldId) renderTerminalPane(oldId);
+        }
+
+        function closeTab(tabId) {
+            if (tabsData.length === 1) {
+                alert('至少保留一个终端标签页');
+                return;
+            }
+            const index = tabsData.findIndex(t => t.id === tabId);
+            if (index === -1) return;
+            tabsData = tabsData.filter(t => t.id !== tabId);
+            const btnElement = document.querySelector(`.tab-btn[data-tab-id="${tabId}"]`);
+            if (btnElement) btnElement.remove();
+            const paneElement = document.getElementById(`pane-${tabId}`);
+            if (paneElement) paneElement.remove();
+            if (activeTabId === tabId) {
+                let newActiveId = null;
+                if (index - 1 >= 0) newActiveId = tabsData[index-1].id;
+                else if (tabsData.length > 0) newActiveId = tabsData[0].id;
+                if (newActiveId) setActiveTab(newActiveId);
+            } else {
+                renderTerminalPane(activeTabId);
+            }
+        }
+
+        // 新建标签（指定 profile 类型）
+        function createNewTab(profileType = 'powershell') {
+            const template = profileTemplates[profileType];
+            if (!template) return;
+            const newId = `tab${nextTabIdCounter++}`;
+            const newTab = {
+                id: newId,
+                name: template.name,
+                icon: template.icon,
+                prompt: template.prompt,
+                profile: profileType,
+                contentLines: [...template.initLines]
+            };
+            if (newTab.contentLines.length && !newTab.contentLines[newTab.contentLines.length-1].endsWith(newTab.prompt)) {
+                newTab.contentLines.push(newTab.prompt);
+            }
+            tabsData.push(newTab);
+            renderTabButton(newTab);
+            createTerminalPanel(newId);
+            renderTerminalPane(newId);
+            setActiveTab(newId);
+            scrollTabIntoView(newId);
+        }
+
+        function scrollTabIntoView(tabId) {
+            const btn = document.querySelector(`.tab-btn[data-tab-id="${tabId}"]`);
+            if (btn) btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+
+        function renderTabButton(tab) {
+            const tabsList = document.getElementById('tabsList');
+            if (document.querySelector(`.tab-btn[data-tab-id="${tab.id}"]`)) return;
+            const btn = document.createElement('div');
+            btn.className = `tab-btn ${activeTabId === tab.id ? 'active' : ''}`;
+            btn.setAttribute('data-tab-id', tab.id);
+            const iconSpan = document.createElement('span');
+            iconSpan.className = 'text-xs opacity-80';
+            iconSpan.innerText = tab.icon;
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'truncate max-w-[100px] text-sm';
+            titleSpan.innerText = tab.name.length > 14 ? tab.name.slice(0,12)+'..' : tab.name;
+            const closeSpan = document.createElement('button');
+            closeSpan.className = 'tab-close w-5 h-5 rounded flex items-center justify-center ml-1 text-gray-400 hover:text-white transition';
+            closeSpan.innerHTML = '&times;';
+            closeSpan.style.fontSize = '16px';
+            closeSpan.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeTab(tab.id);
+            });
+            btn.appendChild(iconSpan);
+            btn.appendChild(titleSpan);
+            btn.appendChild(closeSpan);
+            if (activeTabId === tab.id) {
+                const indicator = document.createElement('div');
+                indicator.className = 'active-tab-indicator tab-indicator';
+                btn.appendChild(indicator);
+            }
+            btn.addEventListener('click', () => setActiveTab(tab.id));
+            // 插入到新建按钮之前（新建按钮在 tabsList 之后）
+            tabsList.appendChild(btn);
+        }
+
+        function createTerminalPanel(tabId) {
+            const container = document.getElementById('terminalContainer');
+            if (document.getElementById(`pane-${tabId}`)) return;
+            const panelDiv = document.createElement('div');
+            panelDiv.id = `pane-${tabId}`;
+            panelDiv.setAttribute('data-pane-id', tabId);
+            panelDiv.className = `terminal-pane absolute inset-0 w-full h-full transition-opacity duration-200 ${activeTabId === tabId ? 'opacity-100 z-10 visible' : 'opacity-0 z-0 invisible'} pointer-events-${activeTabId === tabId ? 'auto' : 'none'}`;
+            panelDiv.style.backgroundColor = '#0C0C0C';
+            container.appendChild(panelDiv);
+        }
+
+        function buildFullUI() {
+            const tabsList = document.getElementById('tabsList');
+            const terminalContainer = document.getElementById('terminalContainer');
+            if (tabsList) tabsList.innerHTML = '';
+            if (terminalContainer) terminalContainer.innerHTML = '';
+            initTerminalContent();
+            tabsData.forEach(tab => {
+                renderTabButton(tab);
+                createTerminalPanel(tab.id);
+                renderTerminalPane(tab.id);
+            });
+            setActiveTab(activeTabId);
+        }
+
+        // 下拉菜单逻辑
+        let activeDropdown = null;
+        function showDropdownMenu(targetElement, items) {
+            if (activeDropdown) activeDropdown.remove();
+            const menu = document.createElement('div');
+            menu.className = 'dropdown-menu';
+            items.forEach(item => {
+                const menuItem = document.createElement('div');
+                menuItem.className = 'dropdown-item';
+                menuItem.innerText = item.label;
+                menuItem.addEventListener('click', () => {
+                    item.action();
+                    menu.remove();
+                    if (activeDropdown === menu) activeDropdown = null;
+                });
+                menu.appendChild(menuItem);
+            });
+            const rect = targetElement.getBoundingClientRect();
+            menu.style.position = 'fixed';
+            menu.style.top = `${rect.bottom + 4}px`;
+            menu.style.left = `${rect.left}px`;
+            document.body.appendChild(menu);
+            activeDropdown = menu;
+            const closeHandler = (e) => {
+                if (!menu.contains(e.target) && e.target !== targetElement) {
+                    menu.remove();
+                    if (activeDropdown === menu) activeDropdown = null;
+                    document.removeEventListener('click', closeHandler);
+                }
+            };
+            setTimeout(() => document.addEventListener('click', closeHandler), 0);
+        }
+
+        // 交互增强：点击终端模拟命令
+        function bindDemoCommands() {
+            document.getElementById('terminalContainer')?.addEventListener('click', (e) => {
+                const targetPane = e.target.closest('.terminal-pane');
+                if (!targetPane) return;
+                const paneId = targetPane.getAttribute('data-pane-id');
+                if (paneId !== activeTabId) return;
+                const activeTab = tabsData.find(t => t.id === activeTabId);
+                if (!activeTab) return;
+                const lines = activeTab.contentLines;
+                if (lines.length === 0) return;
+                const lastLine = lines[lines.length-1];
+                if (lastLine === activeTab.prompt || lastLine.endsWith('> ') || lastLine.endsWith('$ ')) {
+                    let demoCommand = (activeTab.profile === 'powershell' || activeTab.profile === 'cmd') ? 'dir' : 'ls -la';
+                    lines[lines.length-1] = lastLine + demoCommand;
+                    let outputLines = [];
+                    if (demoCommand === 'dir') {
+                        outputLines = ['    目录: C:\\Users\\Mobile','2025-02-18  10:32    <DIR>          Documents','2025-02-18  09:15    <DIR>          Downloads'];
+                    } else {
+                        outputLines = ['total 68','drwxr-xr-x 4 user user 4096 Feb 18 10:32 .','-rw-r--r-- 1 user user  220 Feb 18 08:20 .bashrc'];
+                    }
+                    outputLines.forEach(line => lines.push(line));
+                    lines.push(activeTab.prompt);
+                    renderTerminalPane(activeTabId);
+                }
+            });
+        }
+
+        // 系统键占位事件
+        function bindSysButtons() {
+            document.getElementById('sysKeyboardBtn')?.addEventListener('click', () => alert('⌨️ 系统键区占位符\n虚拟键盘增强面板 (Ctrl/Alt/方向键等) 即将推出'));
+            document.getElementById('sysSettingsBtn')?.addEventListener('click', () => alert('⚙️ 设置菜单占位符\n主题、配色方案、启动配置等后续版本'));
+        }
+
+        // 新建按钮逻辑
+        function bindNewTabButtons() {
+            const addBtn = document.getElementById('newTabBtnAdd');
+            const arrowBtn = document.getElementById('newTabArrow');
+            if (addBtn) {
+                addBtn.addEventListener('click', () => createNewTab('powershell'));
+            }
+            if (arrowBtn) {
+                arrowBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const items = [
+                        { label: 'PowerShell', action: () => createNewTab('powershell') },
+                        { label: '命令提示符', action: () => createNewTab('cmd') },
+                        { label: 'Ubuntu-22.04 (WSL)', action: () => createNewTab('wsl') },
+                        { label: 'Azure Cloud Shell (演示)', action: () => alert('云端 Shell 占位') }
+                    ];
+                    showDropdownMenu(arrowBtn, items);
+                });
+            }
+        }
+
+        function initTabScroll() {
+            const container = document.getElementById('tabScrollContainer');
+            if (container) {
+                container.addEventListener('wheel', (e) => {
+                    if (e.deltaY !== 0) {
+                        container.scrollLeft += e.deltaY;
+                        e.preventDefault();
+                    }
+                });
+            }
+        }
+
+        function init() {
+            buildFullUI();
+            bindNewTabButtons();
+            bindSysButtons();
+            bindDemoCommands();
+            initTabScroll();
+        }
+        init();
+    </script>
+</body>
+</html>
