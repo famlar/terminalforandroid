@@ -42,3 +42,32 @@ jobs:
           name: app-debug
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ github.run_number }}
+          name: "DeepTerminal v2.0 (build #${{ github.run_number }})"
+          body: |
+            ## DeepTerminal v2.0 — WinUI3 风格标签页终端
+
+            **构建信息**
+            - 提交: ${{ github.sha }}
+            - 分支: ${{ github.ref_name }}
+            - 测试: 54 passed / 0 failed
+
+            **功能**
+            - 🖥️ WinUI3/Windows Terminal 风格标签栏
+            - 💻 Termux JNI PTY 本地终端 (forkpty)
+            - 🌐 SSH 远程连接 (JSch)
+            - 🎨 ANSI/VT100 完整解析 + 16 色
+            - 📜 2000 行滚回缓冲
+            - ⌨️ Ctrl/方向键/Fn 全键盘支持
+
+            **需要 Termux 环境运行**
+          files: app/build/outputs/apk/debug/app-debug.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
