@@ -35,9 +35,8 @@ class MainActivity : AppCompatActivity() {
         setupTabBar()
         setupContentHost()
 
-        // 不自动创建本地终端（PTY 可能在部分设备崩溃）
-        // 用户可通过 "+" 按钮选择 SSH 或本地终端
-        showNewTabDialog()
+        // 自动启动本地终端 (安全: ProcessBuilder, 不会闪退)
+        addLocalTab()
     }
 
     // ========== TabBar 事件 ==========
