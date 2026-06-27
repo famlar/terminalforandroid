@@ -35,8 +35,9 @@ class MainActivity : AppCompatActivity() {
         setupTabBar()
         setupContentHost()
 
-        // 启动时默认打开一个本地 Termux 标签页
-        addLocalTab()
+        // 不自动创建本地终端（PTY 可能在部分设备崩溃）
+        // 用户可通过 "+" 按钮选择 SSH 或本地终端
+        showNewTabDialog()
     }
 
     // ========== TabBar 事件 ==========
