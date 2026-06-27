@@ -13,10 +13,10 @@ data class TerminalTab(
     val subtitle: String = "",
     val tabType: TabType,
     val session: BaseTerminalSession,
-    var state: TabState = TabState.CONNECTING
-) {
+    var state: TabState = TabState.CONNECTING,
     /** WinUI3 风格的标签页顶部彩色指示线颜色 */
-    var accentColor: Int = Color.parseColor("#60CDEF")  // 默认青色
+    var accentColor: Int = Color.parseColor("#60CDEF")
+) {
 
     companion object {
         private var nextId = 0

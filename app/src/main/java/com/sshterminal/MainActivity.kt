@@ -43,7 +43,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupTabBar() {
         tabBar.onTabSelected = { index ->
-            val tab = tabs.getOrNull(index) ?: return@onTabSelected
+            val tab = tabs.getOrNull(index) ?: return@setupTabBar
             contentHost.switchToTab(tab.id)
         }
 

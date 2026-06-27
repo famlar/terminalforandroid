@@ -47,7 +47,7 @@ class TabContentHost @JvmOverloads constructor(
         // 只有活动标签可见
         view.visibility = if (tabId == _activeTabId) VISIBLE else GONE
         tabViews[tabId] = view
-        addView(view, LayoutParams(MATCH_PARENT, MATCH_PARENT))
+        addView(view, FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT))
     }
 
     /**

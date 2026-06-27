@@ -98,8 +98,4 @@ class TermuxPty {
     }
 
     val isAlive: Boolean get() = masterFd != null
-
-    override fun finalize() {
-        close()
-    }
 }
