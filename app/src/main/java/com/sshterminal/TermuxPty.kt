@@ -68,14 +68,16 @@ class TermuxPty {
     ): Boolean {
         close()
 
-        val fd = nativeCreatePty(shell, args, cols, rows) ?: return false
-        masterFd = fd
-
-        // PTY 主端双向：读 = 远程输出, 写 = 用户输入
-        inputStream = FileInputStream(fd)
-        outputStream = FileOutputStream(fd)
-
-        return true
+        return try {
+            val fd = nativeCreatePty(shell, args, cols, rows) ?: return false
+            masterFd = fd
+            inputStream = FileInputStream(fd)
+            outputStream = FileOutputStream(fd)
+            true
+        } catch (e: Exception) {
+            android.util.Log.e("TermuxPty", "create failed: ${e.message}", e)
+            false
+        }
     }
 
     /** 调整窗口尺寸 */
