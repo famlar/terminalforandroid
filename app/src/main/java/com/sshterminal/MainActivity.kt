@@ -1,6 +1,7 @@
 package com.sshterminal
 
 import android.app.AlertDialog
+import android.content.Intent
 import android.os.Bundle
 import android.widget.EditText
 import android.widget.LinearLayout
@@ -158,13 +159,14 @@ class MainActivity : AppCompatActivity() {
     // ========== 新建标签对话框 ==========
 
     private fun showNewTabDialog() {
-        val options = arrayOf("Termux 本地终端", "SSH 远程连接")
+        val options = arrayOf("本地终端 (/system/bin/sh)", "SSH 远程连接", "Termux (外部)")
         AlertDialog.Builder(this)
             .setTitle("新建标签页")
             .setItems(options) { _, which ->
                 when (which) {
                     0 -> addLocalTab()
                     1 -> showSshDialog()
+                    2 -> openInTermux()
                 }
             }
             .setNegativeButton("取消", null)
@@ -215,6 +217,35 @@ class MainActivity : AppCompatActivity() {
             }
             .setNegativeButton("取消", null)
             .show()
+    }
+
+    /** 使用 Termux 的 RUN_COMMAND 打开外部 Termux 终端 */
+    private fun openInTermux() {
+        try {
+            val intent = Intent().apply {
+                setClassName("com.termux", "com.termux.app.RunCommandService")
+                action = "com.termux.RUN_COMMAND"
+                putExtra("com.termux.RUN_COMMAND_PATH",
+                    "/data/data/com.termux/files/usr/bin/bash")
+                putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-i"))
+                putExtra("com.termux.RUN_COMMAND_WORKDIR",
+                    "/data/data/com.termux/files/home")
+            }
+            startService(intent)
+            Toast.makeText(this, "Termux 终端已打开", Toast.LENGTH_SHORT).show()
+        } catch (e: Exception) {
+            // fallback: 启动 Termux 主界面
+            try {
+                val intent = packageManager.getLaunchIntentForPackage("com.termux")
+                if (intent != null) {
+                    startActivity(intent)
+                } else {
+                    Toast.makeText(this, "Termux 未安装", Toast.LENGTH_SHORT).show()
+                }
+            } catch (_: Exception) {
+                Toast.makeText(this, "Termux 未安装", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
     // ========== 生命周期 ==========
