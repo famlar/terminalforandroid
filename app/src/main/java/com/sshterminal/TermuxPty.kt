@@ -9,95 +9,65 @@ import java.io.OutputStream
 /**
  * Termux PTY — JNI 桥接
  *
- * 通过 Termux 的 libtermux.so 调用 forkpty() 创建真正的伪终端。
- * 主端 fd 双向读写 — FileInputStream 读子进程输出, FileOutputStream 写子进程输入。
+ * open(/dev/ptmx) + fork + setsid + execve
+ * JNI 返回 int fd，Kotlin 反射构造 FileDescriptor
  */
 class TermuxPty {
 
     companion object {
         init {
-            try {
-                System.loadLibrary("termux-pty-wrapper")
-            } catch (_: UnsatisfiedLinkError) {
-                // 非 Termux 环境 — 本地终端不可用，SSH 仍正常
-            }
+            try { System.loadLibrary("termux-pty-wrapper") }
+            catch (_: UnsatisfiedLinkError) {}
         }
 
-        /** 创建 PTY，返回主端 FileDescriptor */
-        @JvmStatic
-        private external fun nativeCreatePty(
-            shellPath: String,
-            args: Array<String>,
-            cols: Int,
-            rows: Int
-        ): FileDescriptor?
+        @JvmStatic private external fun nativeCreatePty(
+            shellPath: String, args: Array<String>, cols: Int, rows: Int): Int
 
-        /** 调整 PTY 窗口尺寸 */
-        @JvmStatic
-        private external fun nativeResize(fd: FileDescriptor?, cols: Int, rows: Int)
+        @JvmStatic private external fun nativeResize(fd: Int, cols: Int, rows: Int)
 
-        /** 关闭 PTY 主端 */
-        @JvmStatic
-        private external fun nativeClose(fd: FileDescriptor?)
+        @JvmStatic private external fun nativeClose(fd: Int)
     }
 
-    private var masterFd: FileDescriptor? = null
+    private var fd = -1
+    private var fdObj: FileDescriptor? = null
 
-    /** 子进程输出流（读 = 终端显示内容） */
-    var inputStream: InputStream? = null
-        private set
+    var inputStream: InputStream? = null; private set
+    var outputStream: OutputStream? = null; private set
 
-    /** 子进程输入流（写 = 用户键盘输入） */
-    var outputStream: OutputStream? = null
-        private set
-
-    /**
-     * 创建 PTY 并启动 shell
-     *
-     * @param shell shell 路径 (e.g. /data/data/com.termux/files/usr/bin/bash)
-     * @param args  shell 参数 (e.g. ["-i"] 交互式)
-     * @param cols  初始列数
-     * @param rows  初始行数
-     * @return 成功返回 true
-     */
     fun create(
         shell: String = "/data/data/com.termux/files/usr/bin/bash",
         args: Array<String> = arrayOf("-i"),
-        cols: Int = 80,
-        rows: Int = 24
+        cols: Int = 80, rows: Int = 24
     ): Boolean {
         close()
-
         return try {
-            val fd = nativeCreatePty(shell, args, cols, rows) ?: return false
-            masterFd = fd
-            inputStream = FileInputStream(fd)
-            outputStream = FileOutputStream(fd)
+            fd = nativeCreatePty(shell, args, cols, rows)
+            if (fd < 0) return false
+
+            // 用反射设置 FileDescriptor.fd (避免 JNI 被隐藏 API 拦截)
+            fdObj = FileDescriptor().apply {
+                val f = FileDescriptor::class.java.getDeclaredField("fd")
+                f.isAccessible = true
+                f.setInt(this, fd)
+            }
+
+            inputStream = FileInputStream(fdObj)
+            outputStream = FileOutputStream(fdObj)
             true
         } catch (e: Exception) {
-            android.util.Log.e("TermuxPty", "create failed: ${e.message}", e)
+            android.util.Log.e("TermuxPty", "create: ${e.message}", e)
             false
         }
     }
 
-    /** 调整窗口尺寸 */
-    fun resize(cols: Int, rows: Int) {
-        nativeResize(masterFd, cols, rows)
-    }
+    fun resize(cols: Int, rows: Int) { nativeResize(fd, cols, rows) }
 
-    /** 关闭 PTY */
     fun close() {
-        try {
-            inputStream?.close()
-        } catch (_: Exception) {}
-        try {
-            outputStream?.close()
-        } catch (_: Exception) {}
-        nativeClose(masterFd)
-        masterFd = null
-        inputStream = null
-        outputStream = null
+        try { inputStream?.close() } catch (_: Exception) {}
+        try { outputStream?.close() } catch (_: Exception) {}
+        if (fd >= 0) { nativeClose(fd); fd = -1 }
+        fdObj = null; inputStream = null; outputStream = null
     }
 
-    val isAlive: Boolean get() = masterFd != null
+    val isAlive: Boolean get() = fd >= 0
 }
