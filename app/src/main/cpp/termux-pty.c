@@ -1,8 +1,8 @@
 /**
- * Android PTY JNI wrapper — Termux-compatible manual PTY creation
+ * Android PTY JNI — Termux-compatible manual PTY
  *
- * Uses open("/dev/ptmx") + grantpt + unlockpt + fork + setsid
- * This is the same approach Termux uses, avoiding forkpty() quirks.
+ * open(/dev/ptmx) → grantpt → unlockpt → fork → setsid → execve
+ * Key: after fork(), child uses ONLY async-signal-safe functions.
  */
 #include <jni.h>
 #include <stdlib.h>
@@ -10,12 +10,11 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
-#include <termios.h>
 #include <android/log.h>
 #include <errno.h>
-#include <signal.h>
 
-#define TAG "TermuxPty"
+#define TAG "PTY"
+#define LOGI(...) __android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
 
 JNIEXPORT jobject JNICALL
@@ -25,16 +24,18 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
     jint cols, jint rows) {
 
 #ifndef __ANDROID__
-    LOGE("PTY not available (CI)");
     return NULL;
 #else
+    LOGI("nativeCreatePty start");
+
     const char *shell = (*env)->GetStringUTFChars(env, shellPath, NULL);
-    if (!shell) return NULL;
+    if (!shell) { LOGE("shellPath null"); return NULL; }
+    LOGI("shell=%s", shell);
 
     /* Build argv */
     jsize argc = args ? (*env)->GetArrayLength(env, args) : 0;
     const char **argv = calloc(argc + 2, sizeof(char*));
-    if (!argv) { (*env)->ReleaseStringUTFChars(env, shellPath, shell); return NULL; }
+    if (!argv) { LOGE("calloc failed"); goto release_shell; }
     argv[0] = shell;
     for (int i = 0; i < argc; i++) {
         jstring a = (jstring)(*env)->GetObjectArrayElement(env, args, i);
@@ -42,84 +43,69 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
     }
     argv[argc+1] = NULL;
 
-    /* ── Manual PTY creation (Termux-style) ── */
+    /* Open PTY master */
+    LOGI("opening /dev/ptmx");
     int ptm = open("/dev/ptmx", O_RDWR | O_CLOEXEC);
-    if (ptm < 0) {
-        LOGE("open /dev/ptmx failed: %s", strerror(errno));
-        goto fail_open;
-    }
+    if (ptm < 0) { LOGE("open /dev/ptmx: %s (errno=%d)", strerror(errno), errno); goto fail_argv; }
+    LOGI("ptm=%d", ptm);
 
-    if (grantpt(ptm) < 0) {
-        LOGE("grantpt failed: %s", strerror(errno));
-        goto fail_pty;
-    }
+    if (grantpt(ptm) < 0) { LOGE("grantpt: %s", strerror(errno)); goto fail_ptm; }
+    if (unlockpt(ptm) < 0) { LOGE("unlockpt: %s", strerror(errno)); goto fail_ptm; }
 
-    if (unlockpt(ptm) < 0) {
-        LOGE("unlockpt failed: %s", strerror(errno));
-        goto fail_pty;
-    }
-
-    /* Fork child process */
+    LOGI("about to fork()");
     pid_t pid = fork();
-    if (pid < 0) {
-        LOGE("fork failed: %s", strerror(errno));
-        goto fail_pty;
-    }
+    if (pid < 0) { LOGE("fork: %s (errno=%d)", strerror(errno), errno); goto fail_ptm; }
 
     if (pid == 0) {
-        /* ── Child process ── */
-        int pts;
+        /* ═══════════════ CHILD ═══════════════ */
+        /* ASYNC-SIGNAL-SAFE ONLY after fork! No malloc, no setenv, no JNI */
         char ptsName[64];
+        char *name = ptsname(ptm);
+        if (!name) _exit(1);
 
-        /* Create new session, become process group leader */
-        setsid();
+        /* Create new session */
+        if (setsid() < 0) _exit(2);
 
-        /* Open slave side */
-        pts = open(ptsname(ptm), O_RDWR);
-        if (pts < 0) {
-            LOGE("child: open pts failed: %s", strerror(errno));
-            exit(1);
-        }
-        close(ptm); /* close master in child */
+        /* Open slave */
+        int pts = open(name, O_RDWR);
+        if (pts < 0) _exit(3);
+        close(ptm);
 
-        /* Redirect stdin/stdout/stderr to slave */
+        /* Redirect stdio to slave */
         dup2(pts, STDIN_FILENO);
         dup2(pts, STDOUT_FILENO);
         dup2(pts, STDERR_FILENO);
         close(pts);
 
-        /* Set environment (Termux paths) */
-        setenv("HOME", "/data/data/com.termux/files/home", 1);
-        setenv("PREFIX", "/data/data/com.termux/files/usr", 1);
-        setenv("TERM", "xterm-256color", 1);
-        setenv("LANG", "en_US.UTF-8", 1);
-        setenv("PATH", "/data/data/com.termux/files/usr/bin:/system/bin", 1);
-        setenv("SHELL", shell, 1);
-
-        /* Set terminal size */
-        struct winsize ws;
-        ws.ws_col = cols > 0 ? cols : 80;
-        ws.ws_row = rows > 0 ? rows : 24;
-        ws.ws_xpixel = ws.ws_col * 8;
-        ws.ws_ypixel = ws.ws_row * 14;
+        /* Set terminal size (ioctl is async-signal-safe) */
+        struct winsize ws = { (unsigned short)cols, (unsigned short)rows,
+                              (unsigned short)(cols*8), (unsigned short)(rows*14) };
         ioctl(STDIN_FILENO, TIOCSWINSZ, &ws);
 
-        execvp(shell, (char* const*)argv);
-        LOGE("execvp failed: %s", strerror(errno));
-        exit(127);
+        /* Build environment (static, no allocation) */
+        char *envp[] = {
+            "HOME=/data/data/com.termux/files/home",
+            "PREFIX=/data/data/com.termux/files/usr",
+            "TERM=xterm-256color",
+            "LANG=en_US.UTF-8",
+            "PATH=/data/data/com.termux/files/usr/bin:/system/bin",
+            NULL
+        };
+
+        execve(shell, (char* const*)argv, envp);
+        _exit(127);
     }
 
-    /* ── Parent process ── */
+    /* ═══════════════ PARENT ═══════════════ */
+    LOGI("fork OK: child pid=%d", (int)pid);
+
     /* Set non-blocking */
     int flags = fcntl(ptm, F_GETFL, 0);
     if (flags >= 0) fcntl(ptm, F_SETFL, flags | O_NONBLOCK);
 
-    /* Set window size on master */
-    struct winsize ws;
-    ws.ws_col = cols > 0 ? cols : 80;
-    ws.ws_row = rows > 0 ? rows : 24;
-    ws.ws_xpixel = ws.ws_col * 8;
-    ws.ws_ypixel = ws.ws_row * 14;
+    /* Window size on master */
+    struct winsize ws = { (unsigned short)cols, (unsigned short)rows,
+                          (unsigned short)(cols*8), (unsigned short)(rows*14) };
     ioctl(ptm, TIOCSWINSZ, &ws);
 
     /* Create FileDescriptor */
@@ -134,15 +120,18 @@ Java_com_sshterminal_TermuxPty_nativeCreatePty(
         (*env)->ReleaseStringUTFChars(env, (jstring)(*env)->GetObjectArrayElement(env, args, i), argv[i+1]);
     free(argv);
     (*env)->ReleaseStringUTFChars(env, shellPath, shell);
+    LOGI("nativeCreatePty OK");
     return fdObj;
 
-fail_pty:
+fail_ptm:
     close(ptm);
-fail_open:
+fail_argv:
     for (int i = 0; i < argc; i++)
         (*env)->ReleaseStringUTFChars(env, (jstring)(*env)->GetObjectArrayElement(env, args, i), argv[i+1]);
     free(argv);
+release_shell:
     (*env)->ReleaseStringUTFChars(env, shellPath, shell);
+    LOGE("nativeCreatePty FAILED");
     return NULL;
 #endif
 }
@@ -151,11 +140,11 @@ JNIEXPORT void JNICALL
 Java_com_sshterminal_TermuxPty_nativeResize(
     JNIEnv *env, jclass clazz, jobject fdObj, jint cols, jint rows) {
 #ifdef __ANDROID__
-    jclass fdC = (*env)->FindClass(env, "java/io/FileDescriptor");
-    int fd = (*env)->GetIntField(env, fdObj, (*env)->GetFieldID(env, fdC, "fd", "I"));
-    struct winsize ws = { (unsigned short)cols, (unsigned short)rows, (unsigned short)(cols*8), (unsigned short)(rows*14) };
-    if (ioctl(fd, TIOCSWINSZ, &ws) < 0)
-        LOGE("TIOCSWINSZ failed: %s", strerror(errno));
+    jclass fc = (*env)->FindClass(env, "java/io/FileDescriptor");
+    int fd = (*env)->GetIntField(env, fdObj, (*env)->GetFieldID(env, fc, "fd", "I"));
+    struct winsize ws = { (unsigned short)cols, (unsigned short)rows,
+                          (unsigned short)(cols*8), (unsigned short)(rows*14) };
+    ioctl(fd, TIOCSWINSZ, &ws);
 #else
     (void)fdObj; (void)cols; (void)rows;
 #endif
@@ -165,9 +154,9 @@ JNIEXPORT void JNICALL
 Java_com_sshterminal_TermuxPty_nativeClose(
     JNIEnv *env, jclass clazz, jobject fdObj) {
 #ifdef __ANDROID__
-    jclass fdC = (*env)->FindClass(env, "java/io/FileDescriptor");
-    int fd = (*env)->GetIntField(env, fdObj, (*env)->GetFieldID(env, fdC, "fd", "I"));
-    if (fd >= 0) { close(fd); (*env)->SetIntField(env, fdObj, (*env)->GetFieldID(env, fdC, "fd", "I"), -1); }
+    jclass fc = (*env)->FindClass(env, "java/io/FileDescriptor");
+    int fd = (*env)->GetIntField(env, fdObj, (*env)->GetFieldID(env, fc, "fd", "I"));
+    if (fd >= 0) { close(fd); (*env)->SetIntField(env, fdObj, (*env)->GetFieldID(env, fc, "fd", "I"), -1); }
 #else
     (void)fdObj;
 #endif
