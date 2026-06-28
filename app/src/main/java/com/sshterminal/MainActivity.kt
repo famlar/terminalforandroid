@@ -36,8 +36,8 @@ class MainActivity : AppCompatActivity() {
         setupTabBar()
         setupContentHost()
 
-        // 自动启动本地终端 (安全: ProcessBuilder, 不会闪退)
-        addLocalTab()
+        // 不自动启动（无 TTY），显示选择对话框
+        showNewTabDialog()
     }
 
     // ========== TabBar 事件 ==========
@@ -159,14 +159,13 @@ class MainActivity : AppCompatActivity() {
     // ========== 新建标签对话框 ==========
 
     private fun showNewTabDialog() {
-        val options = arrayOf("本地终端 (/system/bin/sh)", "SSH 远程连接", "Termux (外部)")
+        val options = arrayOf("SSH 远程连接", "Termux 本地终端")
         AlertDialog.Builder(this)
             .setTitle("新建标签页")
             .setItems(options) { _, which ->
                 when (which) {
-                    0 -> addLocalTab()
-                    1 -> showSshDialog()
-                    2 -> openInTermux()
+                    0 -> showSshDialog()
+                    1 -> openInTermux()
                 }
             }
             .setNegativeButton("取消", null)
